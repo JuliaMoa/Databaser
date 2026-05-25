@@ -320,25 +320,18 @@ WHERE LastName = 'Orwell';
 
 CREATE OR ALTER VIEW TitlarPerFörfattare AS
 SELECT
-    aa.FirstName + ' ' + aa.LastName AS Namn,
-    CAST(aa.Age AS VARCHAR(4)) + ' år' AS Ålder,
-    CAST(COUNT(DISTINCT b.ISBN13) AS VARCHAR(10)) + ' st' AS Titlar,
-    CAST(SUM(sq.QuantityInStock * cp.Price) AS VARCHAR(20)) + ' kr' AS Lagervärde
-FROM (
-    SELECT
-        ID AS AuthorID,
-        FirstName,
-        LastName,
-        CASE 
-            WHEN DateOfDeath IS NULL 
-                THEN DATEDIFF(YEAR, DateOfBirth, GETDATE())
-            ELSE DATEDIFF(YEAR, DateOfBirth, DateOfDeath)
-        END AS Age
-    FROM Authors
-) aa
-JOIN Books_Authors ba ON ba.AuthorID = aa.AuthorID
-JOIN Books b ON b.ISBN13 = ba.ISBN13
-JOIN StockQuantity sq ON sq.ISBN13 = b.ISBN13
+    A.FirstName + ' ' + A.LastName AS Namn,
+    CASE 
+        WHEN A.DateOfDeath IS NULL 
+            THEN CAST(DATEDIFF(YEAR, A.DateOfBirth, GETDATE()) AS VARCHAR(4)) + ' år'
+        ELSE 'död'
+    END AS Ålder,
+    CAST(COUNT(DISTINCT B.ISBN13) AS VARCHAR(10)) + ' st' AS Titlar,
+    CAST(SUM(SQ.QuantityInStock * P.Price) AS VARCHAR(20)) + ' kr' AS Lagervärde
+FROM Authors A
+JOIN Books_Authors BA ON BA.AuthorID = A.ID
+JOIN Books B ON B.ISBN13 = BA.ISBN13
+JOIN StockQuantity SQ ON SQ.ISBN13 = B.ISBN13
 JOIN (
     SELECT p1.ISBN13, p1.Price
     FROM Prices p1
@@ -347,15 +340,123 @@ JOIN (
         FROM Prices
         GROUP BY ISBN13
     ) p2 ON p1.ISBN13 = p2.ISBN13 AND p1.ValidFrom = p2.LatestDate
-) cp ON cp.ISBN13 = b.ISBN13
-GROUP BY aa.FirstName, aa.LastName, aa.Age;
+) P ON P.ISBN13 = B.ISBN13
+GROUP BY 
+    A.FirstName, 
+    A.LastName,
+    A.DateOfBirth,
+    A.DateOfDeath;
 
+
+SELECT * FROM TitlarPerFörfattare
 
 -- stored procedure
 
+CREATE OR ALTER PROCEDURE FlyttaBok
+    @ISBN13 CHAR(13),
+    @FromStoreID INT,
+    @ToStoreID INT,
+    @Quantity INT
+AS
+BEGIN
+    SET NOCOUNT ON;
 
+    BEGIN TRY
+
+        BEGIN TRANSACTION;
+
+        DECLARE @CurrentStock INT;
+
+        -- Kontrollera att boken finns i från-butiken
+        SELECT @CurrentStock = QuantityInStock
+        FROM StockQuantity
+        WHERE StoreID = @FromStoreID AND ISBN13 = @ISBN13;
+
+        IF @CurrentStock IS NULL
+        BEGIN
+            THROW 50001, 'Boken finns inte i från-butiken.', 1;
+        END
+
+        -- Kontrollera att det finns tillräckligt antal
+        IF @CurrentStock < @Quantity
+        BEGIN
+            THROW 50002, 'Det finns inte tillräckligt många exemplar i från-butiken.', 1;
+        END
+
+        -- Minska lagret i från-butiken
+        UPDATE StockQuantity
+        SET QuantityInStock = QuantityInStock - @Quantity
+        WHERE StoreID = @FromStoreID AND ISBN13 = @ISBN13;
+
+        -- Om boken inte finns i till-butiken → skapa rad
+        IF NOT EXISTS (
+            SELECT 1 
+            FROM StockQuantity 
+            WHERE StoreID = @ToStoreID AND ISBN13 = @ISBN13
+        )
+        BEGIN
+            INSERT INTO StockQuantity (StoreID, ISBN13, QuantityInStock)
+            VALUES (@ToStoreID, @ISBN13, 0);
+        END
+
+        -- Öka lagret i till-butiken
+        UPDATE StockQuantity
+        SET QuantityInStock = QuantityInStock + @Quantity
+        WHERE StoreID = @ToStoreID AND ISBN13 = @ISBN13;
+
+        COMMIT TRANSACTION;
+
+        PRINT 'Flytt genomförd.';
+
+    END TRY
+
+    BEGIN CATCH
+
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
+        DECLARE @ErrNum INT = ERROR_NUMBER();
+
+        THROW @ErrNum, @ErrMsg, 1;
+
+    END CATCH
+END;
+
+EXEC FlyttaBok 
+    @ISBN13 = '9789129700001',
+    @FromStoreID = 1,
+    @ToStoreID = 2,
+    @Quantity = 3;
+
+--- ovan executed och funkar trots att VS Code römarkerar
 
 -- vy 2
+CREATE OR ALTER VIEW FörsäljningPerKategori AS
+SELECT
+    C.CategoryName AS Kategori,
+    COUNT(DISTINCT B.ISBN13) AS AntalTitlar,
+    SUM(OI.Quantity) AS AntalSålda,
+    SUM(OI.Quantity * P.Price) AS TotalFörsäljning,
+    AVG(P.Price) AS SnittPris
+FROM Categories C
+JOIN Books B ON B.CategoryID = C.CategoryID
+JOIN OrderItems OI ON OI.ISBN13 = B.ISBN13
+JOIN (
+    SELECT p1.ISBN13, p1.Price
+    FROM Prices p1
+    JOIN (
+        SELECT ISBN13, MAX(ValidFrom) AS LatestDate
+        FROM Prices
+        GROUP BY ISBN13
+    ) p2 ON p1.ISBN13 = p2.ISBN13 AND p1.ValidFrom = p2.LatestDate
+) P ON P.ISBN13 = B.ISBN13
+GROUP BY C.CategoryName;
+
+SELECT * FROM FörsäljningPerKategori;
+
+--- ovan executed och funkar
 
 
-
+-- skapa användare 
+--- som programmet ska använda
