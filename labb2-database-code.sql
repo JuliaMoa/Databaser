@@ -18,8 +18,6 @@ GO -- kommandoavgränsare
 USE BookStoreDB;
 GO 
 
-
-
 CREATE TABLE Authors (
     ID INT IDENTITY(1,1) PRIMARY KEY, -- auto unique och not null
     FirstName NVARCHAR(50) NOT NULL CHECK (LEN(LTRIM(RTRIM(FirstName))) > 0),
@@ -460,3 +458,12 @@ SELECT * FROM FörsäljningPerKategori;
 
 -- skapa användare 
 --- som programmet ska använda
+CREATE USER BookStoreUser FOR LOGIN BookStoreUser;
+
+--- ovan executed 
+
+GRANT SELECT ON dbo.Books TO BookStoreUser;
+GRANT SELECT ON dbo.StockQuantity TO BookStoreUser;
+GRANT SELECT ON dbo.Stores TO BookStoreUser;
+
+-- ovan executed
