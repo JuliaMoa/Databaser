@@ -1,10 +1,10 @@
 from sqlalchemy import create_engine, text
 
-# create engine object
+# connection to the database
 
-# fill in when database is done
-connection_url =(
-
+connection_url = (
+    "mssql+pyodbc://BookStoreUser:PizzaParty321!@localhost\\SQLEXPRESS/BookStoreDB"
+    "?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes"
 )
 
 engine = create_engine(connection_url)
@@ -14,9 +14,21 @@ engine = create_engine(connection_url)
 def search_books(search_term: str):
 
     # search for books and show amount per store
+    # sql-code as string in Python, SQLAlchemy sends it to SQL Server
+    # SQLAlchemy använder : param 
+    query = text("""
 
-    query = text(
-
+        SELECT
+                 b.Title AS title,
+                 s.StoreName AS store_name,
+                 sq.QuantityInStock AS quantity
+            FROM Books b 
+            JOIN StockQuantity sq ON b.ISBN13 = sq.ISBN13
+            JOIN Stores s ON sq.StoreId = s.StoreID
+            WHERE b.Title LIKE :search_term 
+            ORDER BY b.Title, s.StoreName; 
+            """
+                
     )
 
     # context manager to close connection automatically
